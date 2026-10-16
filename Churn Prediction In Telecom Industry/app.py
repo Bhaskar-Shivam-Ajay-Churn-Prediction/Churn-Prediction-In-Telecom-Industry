@@ -321,7 +321,12 @@ elif page == "📊  EDA Dashboard":
             pm.columns = ["Payment Method", "Count"]
             fig_pm = px.pie(
                 pm, names="Payment Method", values="Count",
-                color_discrete_sequence=px.colors.sequential.Purpor,
+                color="Payment Method",
+                color_discrete_map={
+                    "Credit Card": "#38bdf8",
+                    "Direct Debit": "#fbbf24",
+                    "Paper Check": "#ef4444",
+                },
                 hole=0.45,
             )
             fig_pm.update_layout(**DARK_LAYOUT, height=350, margin=dict(t=10, b=10))
