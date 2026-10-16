@@ -39,4 +39,5 @@ pip install -r requirements.txt
 6. after that it take some time to install particular libraries which needed, then run eda.py python file, then run train_pipeline.py. if you find any library missing in your virtual enviornment then simply install like: code: .\.venv\Scripts\python.exe -m pip install joblib (only if missing)
 
 7. Then run your project using its appropriate entry point, for example:
-streamlit run app.py
+code:
+.venv\Scripts\streamlit.exe run app.py
