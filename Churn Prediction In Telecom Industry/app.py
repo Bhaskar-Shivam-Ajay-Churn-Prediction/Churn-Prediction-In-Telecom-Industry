@@ -500,7 +500,7 @@ elif page == "🤖  Predict":
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ---- Probability distribution chart ----
-    chart_col, filter_col = st.columns([2, 1])
+    chart_col, pie_col, filter_col = st.columns([2, 1, 1])
     with filter_col:
         filter_opt = st.radio("Filter results", ["All", "Churn (Yes)", "No Churn (No)"], index=0)
         threshold  = st.slider("Churn probability threshold (%)", 0, 100, 50, step=5)
@@ -518,6 +518,27 @@ elif page == "🤖  Predict":
                            annotation_font_color="#facc15")
         fig_hist.update_layout(**DARK_LAYOUT, height=320, margin=dict(t=10, b=10))
         st.plotly_chart(fig_hist, use_container_width=True)
+
+    with pie_col:
+        st.markdown("<div class='section-header'>Predicted Churn Split</div>", unsafe_allow_html=True)
+        prediction_split = pd.DataFrame({
+            "Prediction": ["Predicted to Churn", "Predicted to Stay"],
+            "Count": [churn_count, no_churn_count],
+        })
+        fig_split = px.pie(
+            prediction_split,
+            names="Prediction",
+            values="Count",
+            color="Prediction",
+            color_discrete_map={
+                "Predicted to Churn": "#f87171",
+                "Predicted to Stay": "#34d399",
+            },
+            hole=0.45,
+        )
+        fig_split.update_traces(textinfo="label+value+percent")
+        fig_split.update_layout(**DARK_LAYOUT, height=320, margin=dict(t=10, b=10))
+        st.plotly_chart(fig_split, use_container_width=True)
 
     # ---- Results table ----
     st.markdown("<div class='section-header'>Full Prediction Results</div>", unsafe_allow_html=True)
