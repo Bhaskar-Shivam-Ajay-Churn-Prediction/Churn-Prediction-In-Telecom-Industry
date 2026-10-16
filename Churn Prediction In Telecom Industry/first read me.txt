@@ -8,7 +8,7 @@ if you have then OK
 if you don't have then need to install.
 
 
-2. Open just go to + in VS Code Terminal and open cmd from that place to terminal and navigate to your extracted project folder:
+2. Open VS Code new Terminal and navigate to your extracted project folder:
 something like this
 code:
 cd "C:\Users\Bhaskar\Downloads\churn-prediction-ml-pipeline"
@@ -19,16 +19,24 @@ code:
 py -3.13 -m venv .venv
 
 4. Activate it
-code:
-.venv\Scripts\activate
+Use Command Prompt instead
+If you don't want to change PowerShell's execution policy:
+1. Open the VS Code terminal.
+2. Click the dropdown arrow next to the + icon.
+3. Select Command Prompt.
+4. Run:
+cd /d "E:\CDAC BENGALORE\Project\Churn Prediction In Telecom Industry"
+then:
+.venv\Scripts\activate.bat
+
 
 5.Install the project dependencies:
 code:
 python -m pip install --upgrade pip
+then:
 pip install -r requirements.txt
 
 6. after that it take some time to install particular libraries which needed, then run eda.py python file, then run train_pipeline.py. if you find any library missing in your virtual enviornment then simply install like: code: .\.venv\Scripts\python.exe -m pip install joblib (only if missing)
 
-7. it generate output 
-
-8. but we need streamlit ui for showing our output in browser or port
+7. Then run your project using its appropriate entry point, for example:
+streamlit run app.py
