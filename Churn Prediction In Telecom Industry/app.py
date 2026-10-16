@@ -324,7 +324,7 @@ elif page == "📊  EDA Dashboard":
                 color="Payment Method",
                 color_discrete_map={
                     "Credit Card": "#38bdf8",
-                    "Direct Debit": "#fbbf24",
+                    "Direct Debit": "#facc15",
                     "Paper Check": "#ef4444",
                 },
                 hole=0.45,
