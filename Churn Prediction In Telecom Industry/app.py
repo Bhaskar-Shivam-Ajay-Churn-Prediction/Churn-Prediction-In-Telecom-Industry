@@ -21,6 +21,7 @@ from utils import (
     load_model,
     load_training_data,
     run_prediction,
+    _normalize_col_key,
     MODEL_PATH,
     ROOT,
 )
@@ -429,15 +430,45 @@ elif page == "🤖  Predict":
 
     with upload_col:
         uploaded = st.file_uploader(
-            "Drop an Excel file (.xlsx) of new customers",
-            type=["xlsx"],
-            help="The file should contain the same feature columns used during training.",
+            "Drop an Excel (.xlsx, .xls) or CSV file of new customers",
+            type=["xlsx", "xls", "csv"],
+            help="Upload raw customer records. Common artifacts like '?' and whitespace in numeric columns are automatically sanitized.",
         )
 
     with info_col:
         with st.expander("ℹ️ What columns are needed?", expanded=False):
             st.markdown("The model expects the following **feature columns** (same as training):")
             st.code("\n".join(feature_columns), language="text")
+
+    # ---- Multi-sheet handling for Excel files ----
+    sheet_name = None
+    if uploaded is not None and not uploaded.name.lower().endswith(".csv"):
+        try:
+            xl = pd.ExcelFile(uploaded)
+            sheets = xl.sheet_names
+            if len(sheets) > 1:
+                feat_keys = {_normalize_col_key(c) for c in feature_columns}
+                best_sheet = sheets[0]
+                best_score = -1
+                for s in sheets:
+                    try:
+                        s_cols = pd.read_excel(uploaded, sheet_name=s, nrows=0).columns
+                        s_keys = {_normalize_col_key(c) for c in s_cols}
+                        score = len(feat_keys.intersection(s_keys))
+                        if score > best_score:
+                            best_score = score
+                            best_sheet = s
+                    except Exception:
+                        pass
+                default_idx = sheets.index(best_sheet) if best_sheet in sheets else 0
+                sheet_name = st.selectbox(
+                    "📑 Select Excel Sheet to Predict",
+                    sheets,
+                    index=default_idx,
+                    help="Multiple sheets detected. The sheet matching customer features is auto-selected.",
+                )
+        except Exception:
+            pass
 
     # ---- Use sample data if nothing uploaded ----
     sample_path = ROOT / "data" / "new_customers.xlsx"
@@ -451,18 +482,20 @@ elif page == "🤖  Predict":
             )
             use_sample = True
         else:
-            st.warning("No file uploaded and no sample file found. Please upload an Excel file.")
+            st.warning("No file uploaded and no sample file found. Please upload an Excel or CSV file.")
             st.stop()
 
     # ---- Load data ----
     try:
         if use_sample:
             new_df = pd.read_excel(sample_path)
+        elif uploaded.name.lower().endswith(".csv"):
+            new_df = pd.read_csv(uploaded)
         else:
-            new_df = pd.read_excel(uploaded)
+            new_df = pd.read_excel(uploaded, sheet_name=sheet_name if sheet_name else 0)
         new_df.columns = new_df.columns.str.strip()
     except Exception as e:
-        st.error(f"Could not read the Excel file: {e}")
+        st.error(f"Could not read the uploaded file: {e}")
         st.stop()
 
     if new_df.empty:
@@ -470,8 +503,23 @@ elif page == "🤖  Predict":
         st.stop()
 
     # ---- Run predictions ----
-    with st.spinner("Running churn predictions…"):
-        results = run_prediction(new_df, pipeline, feature_columns)
+    with st.spinner("Sanitizing raw data and running churn predictions…"):
+        results, audit = run_prediction(new_df, pipeline, feature_columns, return_audit=True)
+
+    # Show data cleaning summary if dirty values were cleaned
+    cleaning_msgs = []
+    if audit.get("coerced_numeric_values", 0) > 0 or audit.get("coerced_columns"):
+        cols_str = ", ".join(audit["coerced_columns"]) if audit["coerced_columns"] else "numeric features"
+        cleaning_msgs.append(f"Auto-sanitized non-numeric artifacts ('?', whitespace) in numeric column(s): `{cols_str}`.")
+    if audit.get("missing_columns_added"):
+        cleaning_msgs.append(f"Auto-imputed missing feature column(s) with pipeline defaults: `{', '.join(audit['missing_columns_added'])}`.")
+    if audit.get("dropped_columns"):
+        cleaning_msgs.append(f"Safely excluded non-feature/leakage column(s): `{', '.join(audit['dropped_columns'])}`.")
+
+    if cleaning_msgs:
+        with st.expander("✨ Raw Data Sanitization Report (Auto-Handled)", expanded=False):
+            for m in cleaning_msgs:
+                st.markdown(f"- {m}")
 
     total_customers  = len(results)
     churn_count      = (results["Predicted Churn"] == "Yes").sum()
@@ -539,6 +587,75 @@ elif page == "🤖  Predict":
         fig_split.update_traces(textinfo="label+value+percent")
         fig_split.update_layout(**DARK_LAYOUT, height=320, margin=dict(t=10, b=10))
         st.plotly_chart(fig_split, use_container_width=True)
+
+    # ---- Ground truth evaluation (if test labels are present in the dataset) ----
+    target_col = None
+    for c in new_df.columns:
+        if _normalize_col_key(c) == "churnlabel":
+            target_col = c
+            break
+
+    if target_col is not None:
+        target_map = {
+            "yes": 1, "no": 0, "1": 1, "0": 0, "true": 1, "false": 0,
+            1: 1, 0: 0, True: 1, False: 0,
+        }
+        y_true = new_df[target_col].astype(str).str.strip().str.lower().map(target_map)
+        valid_mask = y_true.notna()
+        if valid_mask.sum() > 0:
+            from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, confusion_matrix
+            y_t = y_true[valid_mask].astype(int)
+            y_p = results.loc[valid_mask, "Predicted Churn"].map({"Yes": 1, "No": 0}).astype(int)
+            y_probs = results.loc[valid_mask, "Churn Probability (%)"] / 100.0
+
+            acc = accuracy_score(y_t, y_p)
+            f1 = f1_score(y_t, y_p, zero_division=0)
+            try:
+                auc_score = roc_auc_score(y_t, y_probs)
+                auc_text = f"{auc_score:.3f}"
+            except Exception:
+                auc_text = "N/A"
+
+            st.markdown("<div class='section-header'>Ground Truth Evaluation (Test Labels Detected)</div>", unsafe_allow_html=True)
+            ev1, ev2, ev3 = st.columns(3)
+            with ev1:
+                st.markdown(
+                    f"<div class='kpi-card'>"
+                    f"<div class='kpi-value'>{acc * 100:.1f}%</div>"
+                    f"<div class='kpi-label'>Accuracy vs Ground Truth</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            with ev2:
+                st.markdown(
+                    f"<div class='kpi-card'>"
+                    f"<div class='kpi-value'>{auc_text}</div>"
+                    f"<div class='kpi-label'>ROC-AUC Score</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            with ev3:
+                st.markdown(
+                    f"<div class='kpi-card'>"
+                    f"<div class='kpi-value'>{f1:.3f}</div>"
+                    f"<div class='kpi-label'>F1-Score</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+            with st.expander("🔎 View Ground Truth Confusion Matrix", expanded=False):
+                cm = confusion_matrix(y_t, y_p)
+                fig_cm = px.imshow(
+                    cm,
+                    text_auto=True,
+                    labels=dict(x="Predicted", y="Actual", color="Customers"),
+                    x=["Stayed (No)", "Churned (Yes)"],
+                    y=["Stayed (No)", "Churned (Yes)"],
+                    color_continuous_scale="Purples",
+                )
+                fig_cm.update_layout(**DARK_LAYOUT, height=280, margin=dict(t=10, b=10))
+                st.plotly_chart(fig_cm, use_container_width=True)
+            st.markdown("<br>", unsafe_allow_html=True)
 
     # ---- Results table ----
     st.markdown("<div class='section-header'>Full Prediction Results</div>", unsafe_allow_html=True)
